@@ -76,7 +76,12 @@ def is_node_type(node: dict, type_name: str, type_code: int) -> bool:
 
 def build_folder_tag(folders: list[str]) -> str:
     """Join folder titles with `/`, dropping leading segments to fit Tag.name."""
-    segments = [title.strip() for title in folders if title and title.strip()]
+    # Tags are comma-separated, so a comma inside a folder title would split it.
+    segments = [
+        " ".join(title.replace(",", " ").split())
+        for title in folders
+        if title and title.strip()
+    ]
     while len(segments) > 1 and len("/".join(segments)) > MAX_TAG_LENGTH:
         segments.pop(0)
     return "/".join(segments)[:MAX_TAG_LENGTH].strip()

@@ -17,7 +17,6 @@ import json
 import os
 import re
 from pathlib import Path
-from datetime import datetime, timezone
 from html import unescape
 from urllib.parse import urljoin
 
@@ -27,6 +26,7 @@ from abx_plugins.plugins.base.utils import (
     emit_snapshot_record,
     emit_tag_record,
     load_config,
+    parse_bookmark_timestamp,
     read_snapshot_source_text,
     write_text_atomic,
 )
@@ -42,14 +42,6 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 os.chdir(OUTPUT_DIR)
 URLS_FILE = Path("urls.jsonl")
 NORESULTS_OUTPUT = "0 URLs parsed"
-
-# Constants for timestamp epoch detection
-UNIX_EPOCH = 0  # 1970-01-01 00:00:00 UTC
-MAC_COCOA_EPOCH = 978307200  # 2001-01-01 00:00:00 UTC (Mac/Cocoa/NSDate epoch)
-
-# Reasonable date range for bookmarks (to detect correct epoch/unit)
-MIN_REASONABLE_YEAR = 1995  # Netscape Navigator era
-MAX_REASONABLE_YEAR = 2035  # Far enough in future
 
 # Browser exports are often malformed HTML, so anchors are scanned manually
 # instead of requiring a valid DOM parse.
@@ -73,116 +65,6 @@ def looks_like_netscape_bookmarks(content: str) -> bool:
     if "<dt" in lowered and "<a" in lowered and "href" in lowered:
         return True
     return "<dl" in lowered and "add_date" in lowered and "href" in lowered
-
-
-def parse_timestamp(timestamp_str: str) -> datetime | None:
-    """
-    Intelligently parse bookmark timestamp with auto-detection of format and epoch.
-
-    Browsers use different timestamp formats:
-    - Firefox: Unix epoch (1970) in seconds (10 digits): 1609459200
-    - Safari: Mac/Cocoa epoch (2001) in seconds (9-10 digits): 631152000
-    - Chrome: Unix epoch in microseconds (16 digits): 1609459200000000
-    - Others: Unix epoch in milliseconds (13 digits): 1609459200000
-
-    Strategy:
-    1. Try parsing with different epoch + unit combinations
-    2. Pick the one that yields a reasonable date (1995-2035)
-    3. Prioritize more common formats (Unix seconds, then Mac seconds, etc.)
-    """
-    if not timestamp_str or timestamp_str == "":
-        return None
-
-    try:
-        timestamp_num = float(timestamp_str)
-    except (ValueError, TypeError):
-        return None
-
-    # Detect sign and work with absolute value
-    abs_timestamp = abs(timestamp_num)
-
-    # Determine number of digits to guess the unit
-    if abs_timestamp == 0:
-        num_digits = 1
-    else:
-        num_digits = len(str(int(abs_timestamp)))
-
-    # Try different interpretations in order of likelihood
-    candidates = []
-
-    # Unix epoch seconds (10-11 digits) - Most common: Firefox, Chrome HTML export
-    if 9 <= num_digits <= 11:
-        try:
-            dt = datetime.fromtimestamp(timestamp_num, tz=timezone.utc)
-            if MIN_REASONABLE_YEAR <= dt.year <= MAX_REASONABLE_YEAR:
-                candidates.append((dt, "unix_seconds", 100))  # Highest priority
-        except (ValueError, OSError, OverflowError):
-            pass
-
-    # Mac/Cocoa epoch seconds (9-10 digits) - Safari
-    # Only consider if Unix seconds didn't work or gave unreasonable date
-    if 8 <= num_digits <= 11:
-        try:
-            dt = datetime.fromtimestamp(
-                timestamp_num + MAC_COCOA_EPOCH,
-                tz=timezone.utc,
-            )
-            if MIN_REASONABLE_YEAR <= dt.year <= MAX_REASONABLE_YEAR:
-                candidates.append((dt, "mac_seconds", 90))
-        except (ValueError, OSError, OverflowError):
-            pass
-
-    # Unix epoch milliseconds (13 digits) - JavaScript exports
-    if 12 <= num_digits <= 14:
-        try:
-            dt = datetime.fromtimestamp(timestamp_num / 1000, tz=timezone.utc)
-            if MIN_REASONABLE_YEAR <= dt.year <= MAX_REASONABLE_YEAR:
-                candidates.append((dt, "unix_milliseconds", 95))
-        except (ValueError, OSError, OverflowError):
-            pass
-
-    # Mac/Cocoa epoch milliseconds (12-13 digits) - Rare
-    if 11 <= num_digits <= 14:
-        try:
-            dt = datetime.fromtimestamp(
-                (timestamp_num / 1000) + MAC_COCOA_EPOCH,
-                tz=timezone.utc,
-            )
-            if MIN_REASONABLE_YEAR <= dt.year <= MAX_REASONABLE_YEAR:
-                candidates.append((dt, "mac_milliseconds", 85))
-        except (ValueError, OSError, OverflowError):
-            pass
-
-    # Unix epoch microseconds (16-17 digits) - Chrome WebKit timestamps
-    if 15 <= num_digits <= 18:
-        try:
-            dt = datetime.fromtimestamp(timestamp_num / 1_000_000, tz=timezone.utc)
-            if MIN_REASONABLE_YEAR <= dt.year <= MAX_REASONABLE_YEAR:
-                candidates.append((dt, "unix_microseconds", 98))
-        except (ValueError, OSError, OverflowError):
-            pass
-
-    # Mac/Cocoa epoch microseconds (15-16 digits) - Very rare
-    if 14 <= num_digits <= 18:
-        try:
-            dt = datetime.fromtimestamp(
-                (timestamp_num / 1_000_000) + MAC_COCOA_EPOCH,
-                tz=timezone.utc,
-            )
-            if MIN_REASONABLE_YEAR <= dt.year <= MAX_REASONABLE_YEAR:
-                candidates.append((dt, "mac_microseconds", 80))
-        except (ValueError, OSError, OverflowError):
-            pass
-
-    # If no candidates found, return None
-    if not candidates:
-        return None
-
-    # Sort by priority (highest first) and return best match
-    candidates.sort(key=lambda x: x[2], reverse=True)
-    best_dt, best_format, _ = candidates[0]
-
-    return best_dt
 
 
 def normalize_bookmark_url(bookmark_url: str, root_url: str) -> str:
@@ -453,11 +335,11 @@ def main(
 
         # Parse timestamp with intelligent format detection
         if timestamp_str:
-            dt = parse_timestamp(timestamp_str)
+            dt = parse_bookmark_timestamp(timestamp_str)
             if dt:
                 entry["bookmarked_at"] = dt.isoformat()
         if bookmark["last_modified"]:
-            modified_dt = parse_timestamp(bookmark["last_modified"])
+            modified_dt = parse_bookmark_timestamp(bookmark["last_modified"])
             if modified_dt:
                 entry["last_modified"] = modified_dt.isoformat()
         if bookmark["keyword"]:
