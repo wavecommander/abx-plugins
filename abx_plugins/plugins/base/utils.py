@@ -24,6 +24,7 @@ import stat
 import sys
 from urllib.parse import quote, unquote, urldefrag, urljoin, urlparse, urlsplit
 from collections.abc import Mapping, MutableMapping
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
@@ -1674,6 +1675,78 @@ def emit_snapshot_record(record: dict[str, Any]) -> None:
         else ""
     )
     print_and_flush(sys.stdout, json.dumps(snapshot_record))
+
+
+# ---------------------------------------------------------------------------
+# Bookmark timestamp parsing
+# ---------------------------------------------------------------------------
+
+MAC_COCOA_EPOCH = 978307200  # 2001-01-01 00:00:00 UTC (Mac/Cocoa/NSDate epoch)
+
+# Reasonable date range for bookmarks (to detect correct epoch/unit)
+MIN_REASONABLE_YEAR = 1995  # Netscape Navigator era
+MAX_REASONABLE_YEAR = 2035  # Far enough in future
+
+
+def parse_bookmark_timestamp(value: str | int | float | None) -> datetime | None:
+    """
+    Intelligently parse a bookmark timestamp, auto-detecting epoch and unit.
+
+    Browsers use different timestamp formats:
+    - Netscape HTML exports: Unix epoch in seconds (10 digits): 1609459200
+    - Safari: Mac/Cocoa epoch (2001) in seconds (9-10 digits): 631152000
+    - Others: Unix epoch in milliseconds (13 digits): 1609459200000
+    - Firefox Places JSON, Chrome: Unix epoch in microseconds (16 digits)
+
+    Strategy:
+    1. Try parsing with different epoch + unit combinations
+    2. Pick the one that yields a reasonable date (1995-2035)
+    3. Prioritize more common formats (Unix seconds, then Mac seconds, etc.)
+    """
+    if value is None or value == "":
+        return None
+
+    try:
+        timestamp_num = float(value)
+    except (ValueError, TypeError):
+        return None
+
+    # Detect sign and work with absolute value
+    abs_timestamp = abs(timestamp_num)
+
+    # Determine number of digits to guess the unit
+    try:
+        num_digits = 1 if abs_timestamp == 0 else len(str(int(abs_timestamp)))
+    except (ValueError, OverflowError):
+        return None
+
+    # (min digits, max digits, divisor, epoch offset, priority)
+    interpretations = (
+        (9, 11, 1, 0, 100),  # unix seconds
+        (8, 11, 1, MAC_COCOA_EPOCH, 90),  # mac seconds
+        (12, 14, 1_000, 0, 95),  # unix milliseconds
+        (11, 14, 1_000, MAC_COCOA_EPOCH, 85),  # mac milliseconds
+        (15, 18, 1_000_000, 0, 98),  # unix microseconds
+        (14, 18, 1_000_000, MAC_COCOA_EPOCH, 80),  # mac microseconds
+    )
+    candidates = []
+    for min_digits, max_digits, divisor, epoch_offset, priority in interpretations:
+        if not min_digits <= num_digits <= max_digits:
+            continue
+        try:
+            dt = datetime.fromtimestamp(
+                timestamp_num / divisor + epoch_offset,
+                tz=timezone.utc,
+            )
+        except (ValueError, OSError, OverflowError):
+            continue
+        if MIN_REASONABLE_YEAR <= dt.year <= MAX_REASONABLE_YEAR:
+            candidates.append((dt, priority))
+
+    if not candidates:
+        return None
+
+    return max(candidates, key=lambda candidate: candidate[1])[0]
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,20 @@ SOURCES = {
     "parse_html_urls": f'<html><body><a href="{LINKED_URL}">Linked</a></body></html>',
     "parse_txt_urls": f"{LINKED_URL}\n",
     "parse_jsonl_urls": json.dumps({"url": LINKED_URL, "title": "Linked"}),
+    "parse_firefox_urls": json.dumps(
+        {
+            "guid": "root________",
+            "root": "placesRoot",
+            "children": [
+                {
+                    "typeCode": 1,
+                    "type": "text/x-moz-place",
+                    "title": "Linked",
+                    "uri": LINKED_URL,
+                },
+            ],
+        },
+    ),
     "parse_rss_urls": (
         '<rss version="2.0"><channel><title>URLs</title>'
         f"<item><title>Linked</title><link>{LINKED_URL}</link></item>"

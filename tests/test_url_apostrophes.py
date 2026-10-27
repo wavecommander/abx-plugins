@@ -26,7 +26,13 @@ URLS = [
 
 @pytest.mark.parametrize(
     "plugin",
-    ["parse_jsonl_urls", "parse_rss_urls", "parse_netscape_urls", "parse_html_urls"],
+    [
+        "parse_jsonl_urls",
+        "parse_rss_urls",
+        "parse_netscape_urls",
+        "parse_html_urls",
+        "parse_firefox_urls",
+    ],
 )
 def test_structured_import_preserves_literal_apostrophes(tmp_path, plugin):
     if plugin == "parse_jsonl_urls":
@@ -41,6 +47,23 @@ def test_structured_import_preserves_literal_apostrophes(tmp_path, plugin):
         )
         source += "</channel></rss>"
         suffix = ".xml"
+    elif plugin == "parse_firefox_urls":
+        source = json.dumps(
+            {
+                "guid": "root________",
+                "root": "placesRoot",
+                "children": [
+                    {
+                        "typeCode": 1,
+                        "type": "text/x-moz-place",
+                        "title": "URL",
+                        "uri": url,
+                    }
+                    for url in URLS
+                ],
+            },
+        )
+        suffix = ".json"
     else:
         source = "<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p>\n"
         source += "\n".join(

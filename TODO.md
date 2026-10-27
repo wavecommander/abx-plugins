@@ -545,6 +545,7 @@ Review needed for:
 
 - `abx_plugins/plugins/parse_txt_urls/on_Snapshot__71_parse_txt_urls.py`
 - `abx_plugins/plugins/parse_rss_urls/on_Snapshot__72_parse_rss_urls.py`
+- `abx_plugins/plugins/parse_firefox_urls/on_Snapshot__72_parse_firefox_urls.py`
 - `abx_plugins/plugins/parse_netscape_urls/on_Snapshot__73_parse_netscape_urls.py`
 - `abx_plugins/plugins/parse_jsonl_urls/on_Snapshot__74_parse_jsonl_urls.py`
 

@@ -82,6 +82,11 @@ def test_parser_http_request_completes_with_idle_browser_connection(
             "text/html",
         ),
         (
+            "parse_firefox_urls",
+            '{"guid":"root________","root":"placesRoot","children":[{"typeCode":1,"type":"text/x-moz-place","uri":"https://archivebox.io/tests/"}]}',
+            "application/json",
+        ),
+        (
             "parse_rss_urls",
             '<rss version="2.0"><channel><title>Saved</title><item><link>https://archivebox.io/tests/</link></item></channel></rss>',
             "application/rss+xml",

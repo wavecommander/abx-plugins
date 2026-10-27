@@ -53,6 +53,7 @@ def test_parser_uses_portable_staticfile_result(
                 "parse_jsonl_urls",
                 "parse_rss_urls",
                 "parse_netscape_urls",
+                "parse_firefox_urls",
             ):
                 hook = next(
                     (Path(__file__).parents[1] / "abx_plugins/plugins" / plugin).glob(

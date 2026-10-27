@@ -63,6 +63,10 @@ def test_search_hooks_require_explicit_id_even_when_context_contains_one(
         ("parse_html_urls", '<a href="https://example.com/child">child</a>'),
         ("parse_jsonl_urls", '{"url":"https://example.com/child"}\n'),
         (
+            "parse_firefox_urls",
+            '{"guid":"root________","root":"placesRoot","children":[{"typeCode":1,"type":"text/x-moz-place","title":"Child","uri":"https://example.com/child"}]}',
+        ),
+        (
             "parse_netscape_urls",
             '<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p><DT><A HREF="https://example.com/child">Child</A></DL>',
         ),

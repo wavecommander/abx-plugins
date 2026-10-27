@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Parse Firefox URLs",
+  "description": "Parse Firefox bookmark JSON backups (Places tree) and emit discovered URLs as JSONL snapshot records.",
+  "screenshot": "screenshot.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required_plugins": [],
+  "required_binaries": [],
+  "output_mimetypes": [
+    "application/x-ndjson"
+  ],
+  "properties": {
+    "PARSE_FIREFOX_URLS_ENABLED": {
+      "type": "boolean",
+      "default": true,
+      "x-aliases": [
+        "USE_PARSE_FIREFOX_URLS"
+      ],
+      "description": "Enable Firefox bookmarks JSON URL parsing"
+    },
+    "PARSE_FIREFOX_URLS_FOLDER_TAGS": {
+      "type": "boolean",
+      "default": true,
+      "description": "Add each bookmark's folder path (e.g. Research/Papers) as a tag"
+    }
+  },
+  "x-accepts-internal-input": true,
+  "category": "postprocessing",
+  "display_order": 45,
+  "snapshot_output_group": "metadata"
+}
