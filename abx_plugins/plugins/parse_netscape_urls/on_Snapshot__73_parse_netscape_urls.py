@@ -57,8 +57,12 @@ ATTR_PATTERN = re.compile(
     r"""([^\s=<>"']+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?""",
     re.UNICODE | re.IGNORECASE | re.DOTALL,
 )
-ANCHOR_START_PATTERN = re.compile(r"<[aA](?=[\s>/])")
 ANCHOR_END_PATTERN = re.compile(r"</[aA](?=[\s>/])")
+# Structural tokens recognized by the single forward scan in parse_bookmarks().
+TOKEN_PATTERN = re.compile(r"<(/?)(a|h3|dl|dt|dd)(?=[\s>/])", re.IGNORECASE)
+H3_END_PATTERN = re.compile(r"</h3(?=[\s>/])", re.IGNORECASE)
+DD_END_PATTERN = re.compile(r"<(?:/?dl|dt|dd|h3)(?=[\s>/])", re.IGNORECASE)
+MAX_TAG_NAME_LENGTH = 100  # ArchiveBox Tag.name max_length
 
 
 def looks_like_netscape_bookmarks(content: str) -> bool:
@@ -229,25 +233,101 @@ def find_tag_end(content: str, start: int) -> int:
     return -1
 
 
-def find_next_anchor_start(content: str, start: int) -> int:
-    """Find the next <a tag start without treating words like <article as anchors."""
-    match = ANCHOR_START_PATTERN.search(content, start)
-    return match.start() if match else -1
+def build_folder_tag(folder_names: list[str]) -> str:
+    """Join folder names with "/", dropping leading folders to fit Tag.name."""
+    names = list(folder_names)
+    while len("/".join(names)) > MAX_TAG_NAME_LENGTH and len(names) > 1:
+        names.pop(0)
+    return "/".join(names)[:MAX_TAG_NAME_LENGTH]
 
 
-def iter_bookmarks(content: str):
-    """Yield loose Netscape bookmark anchors from the full file content."""
+def parse_bookmarks(content: str) -> list[dict[str, str]]:
+    """Return loose Netscape bookmark anchors from the full file content.
+
+    Bookmarks are returned after the scan so a trailing <DD> can add notes.
+    This is a single forward scan over <DT>, <DD>, <H3>, <DL>, </DL> and <A>
+    tokens rather than a DOM parse, because browser exports are often malformed.
+    """
+    bookmarks: list[dict[str, str]] = []
     pos = 0
+    pending = None  # bookmark that a following <DD> would describe
+    pending_folder = None  # <H3> name waiting for its <DL>
+    dl_stack: list[str | None] = []  # folder name (or None) for each open <DL>
+    folder_tag = ""
     while True:
-        anchor_start = find_next_anchor_start(content, pos)
-        if anchor_start == -1:
-            return
+        token = TOKEN_PATTERN.search(content, pos)
+        if token is None:
+            break
+        closing = bool(token.group(1))
+        name = token.group(2).lower()
+        token_start = token.start()
 
-        open_end = find_tag_end(content, anchor_start)
+        if name == "dl":
+            open_end = find_tag_end(content, token_start)
+            pos = open_end + 1 if open_end != -1 else token.end()
+            pending = None
+            if closing:
+                if dl_stack:
+                    dl_stack.pop()
+            else:
+                dl_stack.append(pending_folder)
+            pending_folder = None
+            folder_tag = build_folder_tag([n for n in dl_stack if n])
+            continue
+
+        if closing:
+            # Stray </a>, </h3>, </dt> or </dd> outside the constructs below.
+            pos = token.end()
+            continue
+
+        if name == "dt":
+            pos = token.end()
+            pending = None
+            pending_folder = None
+            continue
+
+        if name == "dd":
+            open_end = content.find(">", token.end())
+            pos = open_end + 1 if open_end != -1 else len(content)
+            if pending is not None:
+                # Search from the tag end only; a folder <DD> is never read.
+                dd_end = DD_END_PATTERN.search(content, pos)
+                notes = clean_bookmark_title(
+                    content[pos : dd_end.start() if dd_end else len(content)],
+                )
+                if notes:
+                    pending["notes"] = notes
+            pending = None
+            continue
+
+        open_end = find_tag_end(content, token_start)
         if open_end == -1:
-            return
+            break
 
-        attrs_text = content[anchor_start + 2 : open_end]
+        if name == "h3":
+            attrs = parse_bookmark_attrs(content[token.end() : open_end])
+            close_match = H3_END_PATTERN.search(content, open_end + 1)
+            if close_match is None:
+                pos = open_end + 1
+                folder_name = ""
+            else:
+                folder_name = clean_bookmark_title(
+                    content[open_end + 1 : close_match.start()],
+                )
+                close_end = find_tag_end(content, close_match.start())
+                pos = close_end + 1 if close_end != -1 else close_match.end()
+            is_root = any(
+                attrs.get(root_attr, "").lower() == "true"
+                for root_attr in ("personal_toolbar_folder", "unfiled_bookmarks_folder")
+            )
+            # Tags are comma-separated, so commas cannot appear in a folder name.
+            folder_name = " ".join(folder_name.replace(",", " ").split())
+            pending_folder = None if is_root or not folder_name else folder_name
+            pending = None
+            continue
+
+        # Anchor
+        attrs_text = content[token.end() : open_end]
         # Search the original text: lowercasing the full file per anchor is
         # quadratic, and Unicode case conversion can change string offsets.
         close_match = ANCHOR_END_PATTERN.search(content, open_end + 1)
@@ -260,16 +340,23 @@ def iter_bookmarks(content: str):
             close_end = find_tag_end(content, close_start)
             pos = close_end + 1 if close_end != -1 else close_start + 3
 
+        pending = None
+        pending_folder = None
         attrs = parse_bookmark_attrs(attrs_text)
         bookmark_url = attrs.get("href")
         if not bookmark_url:
             continue
-        yield {
+        pending = {
             "url": bookmark_url,
             "add_date": attrs.get("add_date", ""),
+            "last_modified": attrs.get("last_modified", ""),
+            "keyword": attrs.get("shortcuturl", "").strip(),
             "tags": attrs.get("tags", ""),
+            "folder_tag": folder_tag,
             "title": clean_bookmark_title(title_text),
         }
+        bookmarks.append(pending)
+    return bookmarks
 
 
 def emit_result(status: str, output_str: str) -> None:
@@ -331,7 +418,7 @@ def main(
     urls_found = []
     all_tags = set()
 
-    for bookmark in iter_bookmarks(content):
+    for bookmark in parse_bookmarks(content):
         bookmark_url = bookmark["url"]
         timestamp_str = bookmark["add_date"]
         tags_str = bookmark["tags"]
@@ -346,6 +433,16 @@ def main(
         }
         if title:
             entry["title"] = title
+        if CONFIG.PARSE_NETSCAPE_URLS_FOLDER_TAGS and bookmark["folder_tag"]:
+            # Append the folder path as one more tag, deduplicated in order.
+            tag_names = list(
+                dict.fromkeys(
+                    tag.strip() for tag in tags_str.split(",") if tag.strip()
+                ),
+            )
+            if bookmark["folder_tag"] not in tag_names:
+                tag_names.append(bookmark["folder_tag"])
+            tags_str = ",".join(tag_names)
         if tags_str:
             entry["tags"] = tags_str
             # Collect unique tags
@@ -359,6 +456,14 @@ def main(
             dt = parse_timestamp(timestamp_str)
             if dt:
                 entry["bookmarked_at"] = dt.isoformat()
+        if bookmark["last_modified"]:
+            modified_dt = parse_timestamp(bookmark["last_modified"])
+            if modified_dt:
+                entry["last_modified"] = modified_dt.isoformat()
+        if bookmark["keyword"]:
+            entry["keyword"] = bookmark["keyword"]
+        if "notes" in bookmark:
+            entry["notes"] = bookmark["notes"]
 
         urls_found.append(entry)
 
