@@ -18,6 +18,11 @@
         "USE_PARSE_NETSCAPE_URLS"
       ],
       "description": "Enable Netscape bookmarks HTML URL parsing"
+    },
+    "PARSE_NETSCAPE_URLS_FOLDER_TAGS": {
+      "type": "boolean",
+      "default": true,
+      "description": "Tag each bookmark with its enclosing folder path (e.g. Research/Papers), excluding the browser's root bookmark containers"
     }
   },
   "x-accepts-internal-input": true,
